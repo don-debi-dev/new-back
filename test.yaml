@@ -1,0 +1,79 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Create a MySQL database in the specified VPC
+
+Parameters:
+  DBInstanceIdentifier:
+    Type: String
+    Description: Identifier for the RDS DB instance
+    Default: test-mysql-db
+  DBMasterUsername:
+    Type: String
+    Description: Username for the master user of the RDS DB instance
+    Default: sqladmin
+  DBMasterPassword:
+    Type: String
+    Description: Password for the master user of the RDS DB instance
+    Default: squeelword
+    NoEcho: true  # Prevent password from being displayed during stack creation
+  DBName:
+    Type: String
+    Description: Name of the initial database on the RDS instance
+    Default: mybackdatabase
+  DBInstanceClass:
+    Type: String
+    Description: Instance class for the RDS DB instance
+    Default: db.c6gd.medium
+  DBAllocatedStorage:
+    Type: Number
+    Description: Allocated storage in gigabytes for the RDS DB instance
+    Default: 20
+  VpcId:
+    Type: String
+    Description: ID of the existing VPC where the database will be placed
+    Default: vpc-087d790305e51b654
+
+Resources:
+  RDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for the RDS DB instance
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3306  # MySQL port
+          ToPort: 3306
+          SourceSecurityGroupId: sg-046363ce379abd7d2  # Allow traffic from the specified security group
+        - IpProtocol: tcp
+          FromPort: 3306  # MySQL port
+          ToPort: 3306
+          CidrIp: 195.67.93.86/32  # Allow traffic from anywhere
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0  # Allow outbound traffic to anywhere
+
+  RDSSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnets available for the RDS DB instance
+      SubnetIds:
+        - subnet-01b77b3892d63fd28
+        - subnet-070dfd4274f62e41f
+
+  RDSDBInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: !Ref DBInstanceIdentifier
+      DBName: !Ref DBName
+      DBInstanceClass: !Ref DBInstanceClass
+      Engine: mysql
+      MasterUsername: !Ref DBMasterUsername
+      MasterUserPassword: !Ref DBMasterPassword
+      AllocatedStorage: !Ref DBAllocatedStorage
+      StorageType: gp2
+      DBSubnetGroupName: !Ref RDSSubnetGroup
+      VPCSecurityGroups: [!Ref RDSSecurityGroup]
+
+Outputs:
+  RDSEndpointAddress:
+    Value: !GetAtt RDSDBInstance.Endpoint.Address
+    Description: Endpoint address of the MySQL DB instance

@@ -1,0 +1,139 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Create Go Lambda function with API Gateway
+
+Parameters:
+  GoLambdaFunctionName:
+    Type: String
+    Description: Name for the Go Lambda function
+    Default: back-stack-test
+  GoLambdaHandler:
+    Type: String
+    Description: Handler function for the Go Lambda function
+    Default: main
+  GoLambdaRuntime:
+    Type: String
+    Description: Runtime for the Go Lambda function
+    Default: provided.al2023  # Use the new Go runtime
+  LambdaCodeS3Bucket:
+    Type: String
+    Description: S3 bucket name where the Lambda function code is stored
+    Default: back-stack-bucket
+  LambdaCodeS3Key:
+    Type: String
+    Description: S3 object key for the Lambda function code
+    Default: bootstrap.zip
+  LambdaSecurityGroupId:
+    Type: String
+    Description: ID of the security group associated with the Lambda function
+    Default: sg-098b371b4a8ffda63  # Replace with the actual ID of the Lambda function security group
+  VpcId:
+    Type: String
+    Description: ID of the existing VPC where resources will be placed
+    Default: vpc-087d790305e51b654
+  SubnetId1:
+    Type: String
+    Description: ID of the first subnet where the Lambda function will be placed
+    Default: subnet-01b77b3892d63fd28
+  SubnetId2:
+    Type: String
+    Description: ID of the second subnet where the Lambda function will be placed
+    Default: subnet-070dfd4274f62e41f
+
+Resources:
+  GoLambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: GoLambdaExecutionPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - ec2:CreateNetworkInterface
+                  - ec2:DeleteNetworkInterface
+                  - ec2:DescribeNetworkInterfaces
+                Resource: "*"
+
+  GoLambdaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for the Go Lambda function
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3306  # MySQL port
+          ToPort: 3306
+          SourceSecurityGroupId: !Ref LambdaSecurityGroupId  # Accept traffic from Lambda security group
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 0
+          ToPort: 65535
+          CidrIp: 0.0.0.0/0  # Allow outbound traffic to make calls to MySQL server
+
+  GoLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Ref GoLambdaFunctionName
+      Handler: !Ref GoLambdaHandler
+      Runtime: !Ref GoLambdaRuntime
+      Role: !GetAtt GoLambdaExecutionRole.Arn
+      Code:
+        S3Bucket: !Ref LambdaCodeS3Bucket
+        S3Key: !Ref LambdaCodeS3Key
+      VpcConfig:
+        SecurityGroupIds: [!GetAtt GoLambdaSecurityGroup.GroupId]
+        SubnetIds:
+          - !Ref SubnetId1
+          - !Ref SubnetId2
+
+  ApiGatewayRestApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: MyApiGateway
+
+  GoLambdaResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !GetAtt ApiGatewayRestApi.RootResourceId
+      RestApiId: !Ref ApiGatewayRestApi
+      PathPart: golambda
+
+  GoLambdaMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: ANY
+      ResourceId: !Ref GoLambdaResource
+      RestApiId: !Ref ApiGatewayRestApi
+      Integration:
+        IntegrationHttpMethod: POST
+        Type: AWS_PROXY
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GoLambdaFunction.Arn}/invocations"
+      MethodResponses:
+        - StatusCode: 200
+
+  ApiGatewayDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn: GoLambdaMethod
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      StageName: dev
+
+Outputs:
+  GoLambdaFunctionArn:
+    Value: !GetAtt GoLambdaFunction.Arn
+    Description: ARN of the Go Lambda function
+  GoLambdaInvokeURL:
+    Value: !Sub "https://${ApiGatewayRestApi}.execute-api.${AWS::Region}.amazonaws.com/golambda/"
+    Description: Invoke URL of the Go Lambda function
